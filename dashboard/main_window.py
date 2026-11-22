@@ -14,6 +14,7 @@ from analytics.reports import export_hourly_csv
 from config import APP_VERSION
 from core.activity_tracker import ActivityAccumulator, ActivityMonitor
 from dashboard.charts import ActivityRangeChart, WeeklyActivityChart
+from dashboard.analytics_panel import AnalyticsPanel
 from dashboard.widgets import MetricCard
 from database.db_manager import DatabaseManager
 
@@ -181,35 +182,8 @@ class MainWindow(QMainWindow):
         container.addLayout(metrics)
 
         
-        chart_tabs = QTabWidget()
-
-        self.chart = WeeklyActivityChart()
-
-        self.month_chart = ActivityRangeChart(
-            "Keystrokes - last 30 days",
-            30,
-            "key_presses"
-        )
-
-        self.hour_chart = ActivityRangeChart(
-            "All events - today by hour",
-            24,
-            "total",
-            axis="hour"
-        )
-
-        self.mouse_chart = ActivityRangeChart(
-            "Mouse clicks - last 7 days",
-            7,
-            "mouse_clicks"
-        )
-
-        chart_tabs.addTab(self.chart, "7 Days")
-        chart_tabs.addTab(self.month_chart, "30 Days")
-        chart_tabs.addTab(self.hour_chart, "Hourly")
-        chart_tabs.addTab(self.mouse_chart, "Mouse")
-
-        container.addWidget(chart_tabs)
+        self.analytics_panel = AnalyticsPanel(self.db)
+        container.addWidget(self.analytics_panel)
 
 
         privacy_panel = QFrame()
@@ -240,6 +214,7 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self, theme: str) -> None:
         self.setStyleSheet(DARK_STYLE if theme == "Dark" else LIGHT_STYLE)
+        self.analytics_panel.set_dark_mode(theme == "Dark")
 
     def _toggle_tracking(self) -> None:
         if self.monitor.is_running:
@@ -277,18 +252,7 @@ class MainWindow(QMainWindow):
         self.keys_card.set_value(today["key_presses"] + pending.key_presses)
         self.clicks_card.set_value(today["mouse_clicks"] + pending.mouse_clicks)
         self.scrolls_card.set_value(today["scroll_events"] + pending.scroll_events)
-        last_seven_days = self.db.daily_totals(7)
-
-        self.chart.display(last_seven_days)
-        self.mouse_chart.display(last_seven_days)
-
-        self.month_chart.display(
-            self.db.daily_totals(30)
-        )
-
-        self.hour_chart.display(
-            self.db.hourly_totals(date.today())
-        )
+        self.analytics_panel.refresh()
 
     def _tick(self) -> None:
         self._flush()
