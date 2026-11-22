@@ -1,0 +1,3 @@
+# The 6.12 series is the last Qt series with Windows 10 support.
+PySide6>=6.8,<6.13
+pynput>=1.7,<2.0
