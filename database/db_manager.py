@@ -76,7 +76,50 @@ class DatabaseManager:
             output.append({"day": current, "key_presses": keys,
                            "mouse_clicks": clicks, "scroll_events": scrolls})
         return output
+    def date_range_totals(self, start: date, end: date):
+        """Get daily activity within a selected date range."""
 
+        if start > end:
+            raise ValueError("Start date cannot be after end date")
+
+        number_of_days = (end - start).days + 1
+
+        return self.daily_totals(
+            days=number_of_days,
+            today=end
+        )
+
+    def hourly_totals(self, selected_day: date):
+        """Get activity for all 24 hours of a day."""
+
+        rows = self._db.execute(
+            """
+            SELECT hour, key_presses, mouse_clicks, scroll_events
+            FROM hourly_activity
+            WHERE day = ?
+            ORDER BY hour
+            """,
+            (selected_day.isoformat(),)
+        ).fetchall()
+
+        lookup = {
+            hour: (keys, clicks, scrolls)
+            for hour, keys, clicks, scrolls in rows
+        }
+
+        results = []
+
+        for hour in range(24):
+            keys, clicks, scrolls = lookup.get(hour, (0, 0, 0))
+
+            results.append({
+                "hour": hour,
+                "key_presses": keys,
+                "mouse_clicks": clicks,
+                "scroll_events": scrolls
+            })
+
+        return results
     def all_hourly_rows(self) -> list[tuple[str, int, int, int, int]]:
         return self._db.execute(
             """SELECT day, hour, key_presses, mouse_clicks, scroll_events
