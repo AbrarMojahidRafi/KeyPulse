@@ -1,5 +1,7 @@
 """KeyPulse v0.1: privacy-first, manually controlled desktop UI."""
 from __future__ import annotations
+from datetime import date
+from PySide6.QtWidgets import QTabWidget
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
@@ -11,7 +13,7 @@ from PySide6.QtWidgets import (
 from analytics.reports import export_hourly_csv
 from config import APP_VERSION
 from core.activity_tracker import ActivityAccumulator, ActivityMonitor
-from dashboard.charts import WeeklyActivityChart
+from dashboard.charts import ActivityRangeChart, WeeklyActivityChart
 from dashboard.widgets import MetricCard
 from database.db_manager import DatabaseManager
 
@@ -34,6 +36,33 @@ QComboBox QAbstractItemView { background: #172237; }
 QProgressBar { background: #28364e; border: 0; border-radius: 6px; text-align: center; color: white; font-size: 9pt; }
 QProgressBar::chunk { background: #3b82f6; border-radius: 6px; }
 QScrollArea { border: none; }
+
+QTabWidget::pane {
+    background: #0b1220;
+    border: 1px solid #273b58;
+    border-radius: 9px;
+}
+
+QTabBar::tab {
+    background: #253652;
+    color: #cbd5e1;
+    padding: 10px 18px;
+    margin-right: 4px;
+    border: 1px solid #39506f;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+QTabBar::tab:selected {
+    background: #172237;
+    color: #ffffff;
+    border-bottom: 2px solid #3b82f6;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #324a70;
+}
+
 """
 LIGHT_STYLE = """
 QWidget { background: #f5f7fc; color: #1b2437; font-family: 'Segoe UI'; font-size: 11pt; }
@@ -53,6 +82,33 @@ QComboBox QAbstractItemView { background: #ffffff; }
 QProgressBar { background: #e5ebf5; border: 0; border-radius: 6px; text-align: center; color: #18243a; font-size: 9pt; }
 QProgressBar::chunk { background: #75a0ff; border-radius: 6px; }
 QScrollArea { border: none; }
+
+QTabWidget::pane {
+    background: #f5f7fc;
+    border: 1px solid #dee5ef;
+    border-radius: 9px;
+}
+
+QTabBar::tab {
+    background: #e9edf6;
+    color: #344054;
+    padding: 10px 18px;
+    margin-right: 4px;
+    border: 1px solid #d0d9e5;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #174dc2;
+    border-bottom: 2px solid #245fe6;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #dce5f4;
+}
+
 """
 
 
@@ -124,8 +180,37 @@ class MainWindow(QMainWindow):
         metrics.addWidget(self.scrolls_card, 0, 2)
         container.addLayout(metrics)
 
+        
+        chart_tabs = QTabWidget()
+
         self.chart = WeeklyActivityChart()
-        container.addWidget(self.chart)
+
+        self.month_chart = ActivityRangeChart(
+            "Keystrokes - last 30 days",
+            30,
+            "key_presses"
+        )
+
+        self.hour_chart = ActivityRangeChart(
+            "All events - today by hour",
+            24,
+            "total",
+            axis="hour"
+        )
+
+        self.mouse_chart = ActivityRangeChart(
+            "Mouse clicks - last 7 days",
+            7,
+            "mouse_clicks"
+        )
+
+        chart_tabs.addTab(self.chart, "7 Days")
+        chart_tabs.addTab(self.month_chart, "30 Days")
+        chart_tabs.addTab(self.hour_chart, "Hourly")
+        chart_tabs.addTab(self.mouse_chart, "Mouse")
+
+        container.addWidget(chart_tabs)
+
 
         privacy_panel = QFrame()
         privacy_panel.setObjectName("Panel")
@@ -192,7 +277,18 @@ class MainWindow(QMainWindow):
         self.keys_card.set_value(today["key_presses"] + pending.key_presses)
         self.clicks_card.set_value(today["mouse_clicks"] + pending.mouse_clicks)
         self.scrolls_card.set_value(today["scroll_events"] + pending.scroll_events)
-        self.chart.display(self.db.daily_totals(7))
+        last_seven_days = self.db.daily_totals(7)
+
+        self.chart.display(last_seven_days)
+        self.mouse_chart.display(last_seven_days)
+
+        self.month_chart.display(
+            self.db.daily_totals(30)
+        )
+
+        self.hour_chart.display(
+            self.db.hourly_totals(date.today())
+        )
 
     def _tick(self) -> None:
         self._flush()
