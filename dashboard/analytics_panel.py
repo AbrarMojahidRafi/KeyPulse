@@ -17,6 +17,11 @@ from PySide6.QtWidgets import (
 )
 
 from analytics.overview_data import build_overview, format_peak_hour
+from analytics.custom_range import (
+    build_custom_overview, chart_rows_for_range, validate_date_range,
+)
+from dashboard.date_range_controls import DateRangeControls
+# KeyPulse Step 06 custom date ranges
 
 
 class MouseWheelPassThroughTabBar(QTabBar):
@@ -64,9 +69,19 @@ class AnalyticsPanel(QWidget):
         self.period_picker.addItem("Today", 1)
         self.period_picker.addItem("Last 7 Days", 7)
         self.period_picker.addItem("Last 30 Days", 30)
+        self.period_picker.addItem("Custom range", "custom")
         self.period_picker.setCurrentIndex(1)
         controls.addWidget(self.period_picker)
         root.addLayout(controls)
+
+        self.custom_controls = DateRangeControls()
+        self.custom_controls.setVisible(False)
+        self._applied_custom_range = self.custom_controls.selected_dates()
+        root.addWidget(self.custom_controls)
+        self.range_caption = QLabel("")
+        self.range_caption.setObjectName("Subtitle")
+        self.range_caption.setWordWrap(True)
+        root.addWidget(self.range_caption)
 
         cards = QGridLayout()
         cards.setSpacing(12)
@@ -110,9 +125,32 @@ class AnalyticsPanel(QWidget):
         tip.setWordWrap(True)
         root.addWidget(tip)
 
-        self.period_picker.currentIndexChanged.connect(lambda _index: self.refresh(force=True))
+        self.period_picker.currentIndexChanged.connect(self._on_period_changed)
+        self.custom_controls.applyRequested.connect(self._apply_custom_dates)
         self._style_tabs()
         self._reflow_cards()
+        self._on_period_changed()
+
+    def _on_period_changed(self, _index: int | None = None) -> None:
+        custom = self.period_picker.currentData() == "custom"
+        self.custom_controls.setVisible(custom)
+        self._last_signature = None
+        self.refresh(force=True)
+
+    def _apply_custom_dates(self) -> None:
+        start, end = self.custom_controls.selected_dates()
+        try:
+            validate_date_range(start, end)
+        except ValueError as error:
+            self.custom_controls.set_feedback(
+                str(error), error=True, dark=self._dark
+            )
+            return
+        self._applied_custom_range = (start, end)
+        self.custom_controls.set_feedback(
+            f"Applied: {start.isoformat()} to {end.isoformat()}", dark=self._dark
+        )
+        self._last_signature = None
         self.refresh(force=True)
 
     @staticmethod
@@ -257,13 +295,20 @@ class AnalyticsPanel(QWidget):
             old_chart.deleteLater()  # QChartView releases the previous chart.
 
     def refresh(self, force: bool = False) -> None:
-        days = int(self.period_picker.currentData())
-        data = build_overview(self.db, days)
+        selection = self.period_picker.currentData()
+        if selection == "custom":
+            start, end = self._applied_custom_range
+            data = build_custom_overview(self.db, start, end)
+            selection_key = ("custom", start.isoformat(), end.isoformat())
+        else:
+            days = int(selection)
+            data = build_overview(self.db, days)
+            selection_key = ("preset", days)
         daily = data["daily"]
         hours = data["hourly_today"]
         summary = data["summary"]
         signature = (
-            days, self._dark, data["as_of"],
+            selection_key, self._dark, data["as_of"],
             tuple((r["day"], r["key_presses"], r["mouse_clicks"], r["scroll_events"]) for r in daily),
             tuple((r["hour"], r["key_presses"], r["mouse_clicks"], r["scroll_events"]) for r in hours),
         )
@@ -276,8 +321,13 @@ class AnalyticsPanel(QWidget):
         self.active_value.setText(str(data["active_days"]))
         self.peak_value.setText(format_peak_hour(data["busiest_hour_today"]))
         self.empty_notice.setVisible(summary["total_events"] == 0)
+        self.range_caption.setText(
+            f"Showing {daily[0]['day']} to {daily[-1]['day']} "
+            f"({len(daily)} days). Hourly tab always shows today."
+        )
 
-        day_labels = [date.fromisoformat(str(r["day"])).strftime("%d/%m") for r in daily]
+        chart_daily = chart_rows_for_range(daily)
+        day_labels = [str(r["label"]) for r in chart_daily]
         hour_labels = [f"{r['hour']:02d}:00" for r in hours]
         blue = "#3b82f6"
         green = "#19b6a0"
@@ -285,13 +335,13 @@ class AnalyticsPanel(QWidget):
 
         self._replace_chart(self.trend_view, self._chart(
             "Keyboard & mouse clicks", day_labels,
-            [("Keypresses", [int(r["key_presses"]) for r in daily], blue),
-             ("Clicks", [int(r["mouse_clicks"]) for r in daily], green)],
+            [("Keypresses", [int(r["key_presses"]) for r in chart_daily], blue),
+             ("Clicks", [int(r["mouse_clicks"]) for r in chart_daily], green)],
         ))
         self._replace_chart(self.mouse_view, self._chart(
             "Mouse clicks & scroll events", day_labels,
-            [("Clicks", [int(r["mouse_clicks"]) for r in daily], green),
-             ("Scrolls", [int(r["scroll_events"]) for r in daily], amber)],
+            [("Clicks", [int(r["mouse_clicks"]) for r in chart_daily], green),
+             ("Scrolls", [int(r["scroll_events"]) for r in chart_daily], amber)],
         ))
         self._replace_chart(self.hourly_view, self._chart(
             "Today's activity by hour", hour_labels,
